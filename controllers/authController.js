@@ -5,6 +5,7 @@ const bcrypt = require("bcrypt");
 const sendOtpEmail = require("../utils/sendOtpEmail"); // a utility to send OTP email
 const jwt = require("jsonwebtoken");
 const generateOtp = require("../utils/generateOtp");
+const { generateToken } = require("../services/generateToken");
 
 // exports.signup = async (req, res) => {
 //   try {
@@ -109,6 +110,7 @@ const generateOtp = require("../utils/generateOtp");
 exports.signup = async (req, res) => {
   try {
     const { username, email, contactNumber, password } = req.body;
+
     console.log(req.body, ".............///////////////");
 
     // Check if the user already exists
@@ -137,15 +139,23 @@ exports.signup = async (req, res) => {
 
     // Hash the password for temporary storage
     const hashedPassword = await bcrypt.hash(password, 10);
+    const userData = {
+      username: username,
+      email: email,
+      contactNumber: contactNumber,
+      password: hashedPassword,
+    };
 
     // Generate JWT Token for unverified user
     const secret = process.env.SECRET_KEY || "default_secret_key";
     console.log("JWT_SECRET:::::::::::::::::::::::", secret); // Log the secret to verify
-    const token = jwt.sign(
-      { username, email, contactNumber, hashedPassword, isVerified: false },
-      secret,
-      { expiresIn: "20m" }
-    );
+    // const token = jwt.sign(
+    //   { username, email, contactNumber, hashedPassword, isVerified: false },
+    //   secret,
+    //   { expiresIn: "20m" }
+    // );
+
+    const token = await generateToken(userData, `20m`);
 
     res.status(200).json({
       message: "OTP sent to email. Please verify.",
@@ -156,7 +166,6 @@ exports.signup = async (req, res) => {
     res.status(500).json({ message: "Error in signup", error });
   }
 };
-
 
 // OTP Verification API
 // exports.verifyOtp = async (req, res) => {
@@ -204,20 +213,24 @@ exports.signup = async (req, res) => {
 //   }
 // };
 
-
 exports.verifyOtp = async (req, res) => {
   try {
     const { email, otp } = req.body;
-
+    console.log(req.user, "//////////////////////,,,,,,,,,,,,,,,,,,,,,,");
+    let userData = req.user;
     // Find OTP record for the email
     const otpData = await Otp.findOne({ email });
     if (!otpData) {
-      return res.status(400).json({ message: "OTP not found. Please request a new one." });
+      return res
+        .status(400)
+        .json({ message: "OTP not found. Please request a new one." });
     }
 
     // Check if OTP has expired
     if (otpData.otpExpires < Date.now()) {
-      return res.status(400).json({ message: "OTP has expired. Please request a new one." });
+      return res
+        .status(400)
+        .json({ message: "OTP has expired. Please request a new one." });
     }
 
     // Check if OTP matches
@@ -226,40 +239,55 @@ exports.verifyOtp = async (req, res) => {
     }
 
     // Extract user details from the token
-    const token = req.headers.authorization?.split(" ")[1];
-    if (!token) {
-      return res.status(401).json({ message: "Token not provided" });
+    // const token = req.headers.authorization?.split(" ")[1];
+    // if (!token) {
+    //   return res.status(401).json({ message: "Token not provided" });
+    // }
+
+    // console.log(token, "token in verifu request");
+
+    // let userData;
+    // try {
+    //   userData = jwt.verify(token, process.env.SECRET_KEY);
+    //   isVerified = true;
+    // } catch (error) {
+    //   return res
+    //     .status(401)
+    //     .json({ message: "Invalid or expired token", error });
+    // }
+    // if (userData.isVerified) {
+    //   return res.status(400).json({ message: "User is already verified" });
+    // }
+
+    // Check if the user already exists in the database
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({
+        message: "User already registered. Please log in instead.",
+      });
     }
 
-    console.log(token,"token in verifu request")
-
-    let userData;
-    try {
-      userData = jwt.verify(token, process.env.SECRET_KEY);
-      isVerified=true;
-    } catch (error) {
-      return res.status(401).json({ message: "Invalid or expired token", error });
-    };
-    if (userData.isVerified) {
-      return res.status(400).json({ message: "User is already verified" });
-    }
-    
     // Create a new user
     const newUser = new User({
       username: userData.username,
       email: userData.email,
       contactNumber: userData.contactNumber,
-      password: userData.hashedPassword, // Use the hashed password from the token
+      password: userData.password, // Use the hashed password from the token
     });
     await newUser.save();
-    console.log(userData,"user in verif llllllllllrequest")
+    console.log(userData, "user in verif llllllllllrequest");
 
     // Clear OTP from the collection
     // await Otp.deleteOne({ email });
-console.log("object deleted")
+    console.log("object deleted");
     // Generate a new JWT Token for the verified user
     const verifiedToken = jwt.sign(
-      { username: userData.username, email: userData.email, contactNumber: userData.contactNumber, isVerified: true },
+      {
+        username: userData.username,
+        email: userData.email,
+        contactNumber: userData.contactNumber,
+        isVerified: true,
+      },
       process.env.SECRET_KEY,
       { expiresIn: "1h" }
     );
